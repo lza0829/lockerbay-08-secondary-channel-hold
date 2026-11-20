@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from app.db import FIXTURES_DIR, connect
+from app.modules import secondary_channel_hold
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -79,6 +80,7 @@ def overdue_hours(conn) -> int:
 def init_db():
     conn = connect()
     conn.executescript(SCHEMA)
+    conn.executescript(secondary_channel_hold.SCHEMA)
     if not conn.execute("SELECT 1 FROM settings WHERE key='overdue_hours'").fetchone():
         conn.execute("INSERT INTO settings(key, value) VALUES ('overdue_hours', '48')")
     if conn.execute("SELECT COUNT(*) AS c FROM cabinets").fetchone()["c"] == 0:

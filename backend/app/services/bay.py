@@ -6,6 +6,9 @@ def overview(conn):
         "free": conn.execute("SELECT COUNT(*) AS c FROM cells WHERE status='free'").fetchone()["c"],
         "events": conn.execute("SELECT COUNT(*) AS c FROM parcel_events").fetchone()["c"],
         "quarantine": conn.execute("SELECT COUNT(*) AS c FROM quarantine").fetchone()["c"],
+        "secondary_holds": conn.execute(
+            "SELECT COUNT(*) AS c FROM secondary_channel_holds"
+        ).fetchone()["c"],
         "open_occupancies": conn.execute(
             "SELECT COUNT(*) AS c FROM occupancies WHERE status='occupied'"
         ).fetchone()["c"],

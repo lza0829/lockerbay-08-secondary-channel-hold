@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Body, HTTPException
 
 from app.db import connect
+from app.modules import secondary_channel_hold
 from app.seed import overdue_hours
 from app.services import bay as bay_svc
 from app.services import ingest as ingest_svc
@@ -75,6 +76,24 @@ def occupancy_proofs():
             "SELECT * FROM occupancy_proofs ORDER BY id DESC LIMIT 50"
         ).fetchall()
         return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+@router.get("/secondary-holds")
+def list_secondary_holds(channel: str | None = None):
+    conn = connect()
+    try:
+        return secondary_channel_hold.list_holds(conn, channel)
+    finally:
+        conn.close()
+
+
+@router.get("/secondary-holds/verify")
+def verify_secondary_holds():
+    conn = connect()
+    try:
+        return secondary_channel_hold.verify(conn)
     finally:
         conn.close()
 

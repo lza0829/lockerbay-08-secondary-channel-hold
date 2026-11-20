@@ -3,21 +3,29 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from app.db import FIXTURES_DIR, connect
+from app.modules import secondary_channel_hold
 
 
 def run_batch():
     path = FIXTURES_DIR / "ingest_batch.json"
     if not path.exists():
-        return {"batch_id": None, "accepted": 0, "message": "无夹具"}
+        return {"batch_id": None, "accepted": 0, "held": 0, "message": "无夹具"}
     data = json.loads(path.read_text(encoding="utf-8"))
     events = data.get("events", [])
     batch_id = f"B-{uuid4().hex[:8]}"
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     conn = connect()
     accepted = 0
+    held = 0
     try:
-        for ev in events:
-            conn.execute(
+        # 失败闭：入口按 channel 分流。非 primary（含 secondary）剔入副通道搁置，
+        # 原 channel 与载荷留存，不参与下方任何占用物化；仅 primary 走既有开/关占用。
+        primary_events, held_events = secondary_channel_hold.route_events(events)
+        for ev in held_events:
+            if secondary_channel_hold.hold_event(conn, ev, batch_id, now):
+                held += 1
+        for ev in primary_events:
+            cur = conn.execute(
                 "INSERT OR IGNORE INTO parcel_events(id, cabinet_id, cell_id, event_type, event_ts, tracking_no, payload_json, channel) VALUES (?,?,?,?,?,?,?,?)",
                 (
                     ev["id"],
@@ -30,7 +38,7 @@ def run_batch():
                     "primary",
                 ),
             )
-            if conn.total_changes:
+            if cur.rowcount:
                 accepted += 1
             if ev["event_type"] == "drop" and ev.get("cell_id"):
                 cell = conn.execute("SELECT status FROM cells WHERE id=?", (ev["cell_id"],)).fetchone()
@@ -54,9 +62,19 @@ def run_batch():
                     conn.execute("UPDATE cells SET status='free' WHERE id=?", (ev["cell_id"],))
         conn.execute(
             "INSERT INTO ingest_batches(id, created_at, report_json) VALUES (?,?,?)",
-            (batch_id, now, json.dumps({"accepted": accepted, "total": len(events)}, ensure_ascii=False)),
+            (
+                batch_id,
+                now,
+                json.dumps(
+                    {"accepted": accepted, "held": held, "total": len(events)},
+                    ensure_ascii=False,
+                ),
+            ),
         )
         conn.commit()
-        return {"batch_id": batch_id, "accepted": accepted, "total": len(events)}
+        return {"batch_id": batch_id, "accepted": accepted, "held": held, "total": len(events)}
+    except Exception:
+        conn.rollback()
+        raise
     finally:
         conn.close()
